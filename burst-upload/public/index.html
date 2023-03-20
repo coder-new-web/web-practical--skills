@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>分片上传demo</title>
+    <script src="./spark-md5.min.js"></script>
+  </head>
+  <body>
+    <h1>分片上传、文件秒传、断点续传</h1>
+    <input type="file" />
+  </body>
+</html>
+<script>
+  //文件上传
+  const ipt = document.querySelector("input");
+  const btn = document.querySelector("button");
+  ipt.onchange = async e => {
+    const file = ipt.files[0];
+    if (!file) {
+      return;
+    }
+    const chunksResult = createChunks(file, 10 * 1024 * 1024);
+    const hashResult = await hash(chunksResult);
+    upload(chunksResult, hashResult);
+  };
+
+  // 文件切块
+  const createChunks = (file, chunkSize) => {
+    const result = [];
+    for (let i = 0; i < file.size; i += chunkSize) {
+      result.push(file.slice(i, i + chunkSize)); // file.slice得到的是blob类型
+    }
+    return result;
+  };
+
+  //根据文件分片计算hash值
+  const hash = chunks => {
+    return new Promise(resolve => {
+      const spark = new SparkMD5();
+      function _read(i) {
+        if (i >= chunks.length) {
+          resolve(spark.end());
+          return;
+        }
+        const blob = chunks[i];
+        const reader = new FileReader();
+
+        reader.readAsArrayBuffer(blob);
+        reader.onload = e => {
+          const bytes = e.target.result; //读取到字节数
+          spark.append(bytes); //将一组字节加入其中完成增量运算
+          _read(i + 1);
+        };
+      }
+      _read(0);
+    });
+  };
+
+  //文件上传
+  const upload = (chunksResult, hashResult) => {
+    for (let i = 0; i < chunksResult.length; i++) {
+      const formData = new FormData();
+      const blobName = `${hashResult}--${i + 1}`; //blobName就是通过MD5签名后第几片的文件
+      const blobFile = new File([chunksResult[i]], blobName);
+      formData.append("file", blobFile);
+      fetch("/upload", {
+        method: "post",
+        body: {
+          formData,
+          hashResult, //用md5签名判断是否需要上传
+        },
+      });
+    }
+  };
+</script>
